@@ -1,0 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base {
+  * { box-sizing: border-box; }
+  body { font-family: 'Be Vietnam Pro', system-ui, sans-serif; background: #F7FBF8; color: #1A2E24; }
+}

@@ -1,0 +1,99 @@
+version: "3.9"
+networks:
+  cocstudy-net:
+    driver: bridge
+volumes:
+  postgres-data:
+  redis-data:
+  uploads-data:
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cocstudy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cocstudy
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cocstudy_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/seed_data.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocstudy -d cocstudy_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cocstudy-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: cocstudy-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cocstudy-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cocstudy-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: development
+      DEBUG: "true"
+      SECRET_KEY: dev-secret-key-change-in-production-32chars
+      DATABASE_URL: postgresql+asyncpg://cocstudy:password@postgres:5432/cocstudy_db
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      UPLOAD_DIR: /app/uploads
+      ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      REFRESH_TOKEN_EXPIRE_DAYS: "30"
+      MAX_AVATAR_SIZE_MB: "5"
+      KNN_NEIGHBORS: "20"
+      RATE_LIMIT_PER_MINUTE: "60"
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads-data:/app/uploads
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - cocstudy-net
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cocstudy-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - cocstudy-net
